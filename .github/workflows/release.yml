@@ -72,3 +72,9 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.sha256
+
+      - name: Upload Windows exe
+        if: ${{ matrix.ext == '.exe' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/todo.exe
