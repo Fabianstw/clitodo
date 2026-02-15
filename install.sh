@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="<Fabianstw>/<clitodo>"
+REPO="Fabianstw/clitodo"
 BIN="todo"             
 VERSION="${VERSION:-latest}"
 
