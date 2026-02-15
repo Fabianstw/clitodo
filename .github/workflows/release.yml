@@ -40,16 +40,31 @@ jobs:
       - name: Prepare artifact
         shell: bash
         run: |
+          set -euo pipefail
+
           BIN="todo${{ matrix.ext }}"
+
           mkdir -p dist
+
+          # 1) Always copy the built binary into dist/
+          cp "target/${{ matrix.target }}/release/$BIN" "dist/$BIN"
+
+          # 2) For Windows, also provide a direct todo.exe download
           if [[ "${{ matrix.ext }}" == ".exe" ]]; then
-            cp "target/${{ matrix.target }}/release/$BIN" dist/todo.exe
+            cp "dist/$BIN" "dist/todo.exe"
           fi
+
           cd dist
+
           ARCHIVE="todo-${{ matrix.target }}.tar.gz"
           tar -czf "$ARCHIVE" "$BIN"
-          HASH=$(openssl dgst -sha256 "$ARCHIVE" | awk '{print $2}')
-          echo "$HASH  $ARCHIVE" > "$ARCHIVE.sha256"
+
+          # sha256 file (macOS + Linux runner have shasum; openssl works too)
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          else
+            openssl dgst -sha256 "$ARCHIVE" | awk '{print $2 "  '"$ARCHIVE"'"}' > "$ARCHIVE.sha256"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
