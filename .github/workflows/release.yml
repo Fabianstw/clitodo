@@ -42,7 +42,9 @@ jobs:
         run: |
           BIN="todo${{ matrix.ext }}"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/$BIN" dist/
+          if [[ "${{ matrix.ext }}" == ".exe" ]]; then
+            cp "target/${{ matrix.target }}/release/$BIN" dist/todo.exe
+          fi
           cd dist
           ARCHIVE="todo-${{ matrix.target }}.tar.gz"
           tar -czf "$ARCHIVE" "$BIN"
