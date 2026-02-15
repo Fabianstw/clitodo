@@ -1,0 +1,25 @@
+[
+  {
+    "title": "Buy groceries",
+    "content": "Milk, eggs, bread",
+    "tags": ["personal", "urgent"],
+    "priority": "High",
+    "due": "today",
+    "branch": "personal"
+  },
+  {
+    "title": "Weekly report",
+    "content": "Summarize KPIs",
+    "tags": ["work"],
+    "priority": "Medium",
+    "repeat": "Weekly",
+    "due": "tomorrow",
+    "branch": "work"
+  },
+  {
+    "title": "Call mom",
+    "tags": ["family"],
+    "priority": "Low",
+    "branch": "personal"
+  }
+]
