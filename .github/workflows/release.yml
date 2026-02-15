@@ -50,7 +50,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/$BIN" "dist/$BIN"
 
           # 2) For Windows, also provide a direct todo.exe download
-          if [[ "${{ matrix.ext }}" == ".exe" ]]; then
+          if [[ "${{ matrix.ext }}" == ".exe" && "$BIN" != "todo.exe" ]]; then
             cp "dist/$BIN" "dist/todo.exe"
           fi
 
