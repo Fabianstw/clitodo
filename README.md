@@ -23,6 +23,11 @@ A fast, local-first CLI todo app built in Rust. Tasks support optional due date,
 ```bash
 cargo build --release
 ```
+or adding to PATH:
+
+```bash
+cargo install --path .
+```
 
 Run with:
 
