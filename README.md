@@ -21,18 +21,7 @@ A fast, local-first CLI todo app built in Rust. Tasks support optional due date,
 ## Install
 
 ```bash
-cargo build --release
-```
-or adding to PATH:
-
-```bash
-cargo install --path .
-```
-
-Run with:
-
-```bash
-cargo run -- <command>
+curl -fsSL https://raw.githubusercontent.com/Fabianstw/clitodo/main/install.sh | sh
 ```
 
 ## Quick start

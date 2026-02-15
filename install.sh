@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="<USER>/<REPO>"      # <-- ändern
-BIN="clitodo"             # <-- ändern
+REPO="<Fabianstw>/<clitodo>"
+BIN="todo"             
 VERSION="${VERSION:-latest}"
 
 os="$(uname -s)"
