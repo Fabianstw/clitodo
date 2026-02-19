@@ -1,263 +1,58 @@
-# todo
+# clitodo
 
-A fast, local-first CLI todo app built in Rust. Tasks support optional due date, priority, and content, with sorting, searching, and exports.
+A fast, local-first CLI todo app.
 
-## Features
+- Stores tasks locally
+- Supports due dates, priorities, tags, branches, recurring tasks
+- Includes a nicer terminal list view + optional daily greeting
 
-- Create, edit, delete, and view tasks
-- Optional fields: due date, priority, content
-- Tags for filtering
-- Interactive edit mode
-- List/search with sorting and filters
-- Toggle done state, list completed tasks
-- Branches with switch, merge, and move
-- Recurring tasks and reminders
-- Bulk updates and stats
-- Import from JSON or CSV
-- Archive done tasks
-- Configurable defaults and shell completions
-- Personal settings (name + daily greeting)
-- Export to JSON, Markdown, or text
+Full documentation will live on a separate website (link coming soon).
 
 ## Install
+
+macOS / Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Fabianstw/clitodo/main/install.sh | sh
 ```
 
-## Quick start
+Windows (PowerShell):
 
-- Import the sample data: `todo import --format json --file start.json`
-- Follow the walkthrough in [example.md](example.md)
-- Sample data file: [start.json](start.json)
-
-## CLI guide
-
-- LaTeX source: [docs/cli-guide.tex](docs/cli-guide.tex)
-- PDF (generated): [docs/cli-guide.pdf](docs/cli-guide.pdf)
-
-## Usage
-
-```bash
-todo <command> [options]
+```powershell
+irm https://raw.githubusercontent.com/Fabianstw/clitodo/main/install.ps1 | iex
 ```
 
-Global options:
+## Examples
+
+Create tasks:
 
 ```bash
---no-color   Disable colored output
-```
-
-### Create
-
-```bash
-todo create "Go shopping" -c "Milk, eggs" -d tomorrow -p high
-todo c "Call mom"
-todo create "Water plants" --repeat weekly
+todo create "Go shopping" -d tomorrow -p high
 todo create "Pack" --tag travel --tag urgent
 ```
 
-### List
+List and search:
 
 ```bash
 todo list
-todo l -a
-todo list --sort priority --desc
 todo list --group-by due-day
-todo list --archived
-todo list --tag urgent
-todo list-all
-todo list-repeat
-```
-
-### Search
-
-```bash
 todo search "shopping"
-todo s "milk" -a --sort due
-todo search "meeting" --tag work
 ```
 
-### View
+Split tasks by whether a due date is set:
 
 ```bash
-todo view 3
-todo v 3
+todo split-due
 ```
 
-### Edit
-
-Interactive edit (no flags):
+Save a command under your own name:
 
 ```bash
-todo edit 3
+todo saved save today -- list --group-by due-day
+todo today
 ```
 
-Non-interactive edit:
-
-```bash
-todo edit 3 --title "Go shopping" --content "Milk, eggs"
-todo edit 3 --clear-content --clear-due
-todo edit 3 --repeat daily
-```
-
-### Done / Undone / Toggle
-
-```bash
-todo done 3
-todo undone 3
-todo toggle 3
-```
-
-### Bulk operations
-
-```bash
-todo bulk-done "shopping"
-todo bulk-undone "shopping"
-todo bulk-delete "shopping"
-todo bulk-move "shopping" work
-todo bulk-edit "shopping" --priority high --clear-due
-todo bulk-edit "shopping" --tag urgent --remove-tag later
-```
-
-### List completed
-
-```bash
-todo list-done
-```
-
-### Export
-
-```bash
-todo export json
-todo export markdown
-todo export text
-todo export json --tag urgent
-```
-
-### Archive
-
-```bash
-todo archive
-todo archive --all-branches
-todo archive 42
-todo unarchive 42
-```
-
-### Import
-
-```bash
-todo import --format json --file tasks.json
-todo import --format csv --file tasks.csv
-```
-
-### Config
-
-```bash
-todo config
-todo config --default-sort priority --default-desc true
-todo config --color false
-todo config --reminder-days 3
-todo config --id-scope branch
-todo config --use-uuid true
-```
-
-### Settings (personalization)
-
-Set your name (used for the daily greeting):
-
-```bash
-todo settings --name "Fabian"
-```
-
-Customize (or clear) the daily message:
-
-```bash
-todo settings --message "You’ve got this." --daily-greeting true
-todo settings --clear-message
-```
-
-More personalization examples:
-
-```bash
-# Night-owl friendly: treat a new day as starting at 06:00
-todo settings --day-start-hour 6
-
-# Compact greeting instead of banner
-todo settings --greeting-style compact
-
-# Summarize across all branches
-todo settings --summary-scope all
-
-# Built-in rotating encouragements (if no custom message is set)
-todo settings --encouragement built-in
-
-# Optional pronouns
-todo settings --pronouns "they/them"
-
-# List UI preferences
-todo settings --list-view table
-todo settings --column due --column priority --column tags
-todo settings --auto-pager true
-```
-
-Show current settings:
-
-```bash
-todo settings
-```
-
-Force the greeting to show again next run:
-
-```bash
-todo settings --reset-greeting
-```
-
-### Completions
-
-```bash
-todo completions bash
-todo completions zsh
-todo completions fish
-```
-
-### Reminders and stats
-
-```bash
-todo reminders
-todo stats
-```
-
-### Branches
-
-```bash
-todo branch work
-todo branch
-todo branch -l
-todo branch-delete work --force
-todo branch-move work personal
-todo branch-dup work personal
-todo branch-merge work personal
-```
-
-## Due date formats
-
-- today
-- tomorrow
-- YYYY-MM-DD
-- DDMMYYYY (e.g. 18022026)
-
-## Short aliases
-
-- branch: b, switch
-- create: c, add
-- list: l, ls
-- list-all: la, list-all
-- list-repeat: lr, list-repeat
-- search: s, find
-- reminders: r, remind, due
-- stats: st, stats
-- bulk-done: bd, bulk-done
+## Quick start data
 - bulk-undone: bu, bulk-undone
 - bulk-delete: bx, bulk-delete
 - bulk-move: bm, bulk-move
