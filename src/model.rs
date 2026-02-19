@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 pub const DEFAULT_BRANCH: &str = "personal";
@@ -14,6 +15,8 @@ pub struct AppState {
     pub current_branch: String,
     #[serde(default)]
     pub config: AppConfig,
+    #[serde(default)]
+    pub profile: UserProfile,
 }
 
 impl Default for AppState {
@@ -21,6 +24,136 @@ impl Default for AppState {
         Self {
             current_branch: default_branch(),
             config: AppConfig::default(),
+            profile: UserProfile::default(),
+        }
+    }
+}
+
+fn default_daily_greeting() -> bool {
+    true
+}
+
+fn default_day_start_hour() -> u8 {
+    6
+}
+
+fn default_greeting_summary() -> bool {
+    true
+}
+
+fn default_greeting_style() -> GreetingStyle {
+    GreetingStyle::Banner
+}
+
+fn default_summary_scope() -> SummaryScope {
+    SummaryScope::Current
+}
+
+fn default_encouragement_mode() -> EncouragementMode {
+    EncouragementMode::BuiltIn
+}
+
+fn default_auto_pager() -> bool {
+    true
+}
+
+fn default_list_view() -> ListViewStyle {
+    ListViewStyle::Table
+}
+
+pub fn default_list_columns() -> Vec<ListColumn> {
+    vec![ListColumn::Due, ListColumn::Priority]
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
+pub enum ListViewStyle {
+    Table,
+    Compact,
+    Cards,
+    Classic,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum, PartialEq, Eq)]
+pub enum ListColumn {
+    Due,
+    Priority,
+    Branch,
+    Tags,
+    Repeat,
+    Content,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
+pub enum GreetingStyle {
+    Banner,
+    Compact,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
+pub enum SummaryScope {
+    Current,
+    All,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
+pub enum EncouragementMode {
+    Off,
+    BuiltIn,
+    CustomOnly,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserProfile {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub pronouns: Option<String>,
+    #[serde(default)]
+    pub daily_message: Option<String>,
+    #[serde(default = "default_daily_greeting")]
+    pub daily_greeting: bool,
+    #[serde(default = "default_day_start_hour")]
+    pub day_start_hour: u8,
+    #[serde(default = "default_greeting_style")]
+    pub greeting_style: GreetingStyle,
+    #[serde(default = "default_greeting_summary")]
+    pub greeting_summary: bool,
+    #[serde(default = "default_summary_scope")]
+    pub summary_scope: SummaryScope,
+    #[serde(default = "default_encouragement_mode")]
+    pub encouragement_mode: EncouragementMode,
+
+    // List UI preferences
+    #[serde(default = "default_list_view")]
+    pub list_view: ListViewStyle,
+    #[serde(default = "default_list_columns")]
+    pub list_columns: Vec<ListColumn>,
+    #[serde(default = "default_auto_pager")]
+    pub auto_pager: bool,
+    /// User-defined saved commands (aliases). Key is the command name; value is argv tokens after `todo`.
+    #[serde(default)]
+    pub saved_commands: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub last_greeted: Option<NaiveDate>,
+}
+
+impl Default for UserProfile {
+    fn default() -> Self {
+        Self {
+            name: None,
+            pronouns: None,
+            daily_message: None,
+            daily_greeting: default_daily_greeting(),
+            day_start_hour: default_day_start_hour(),
+            greeting_style: default_greeting_style(),
+            greeting_summary: default_greeting_summary(),
+            summary_scope: default_summary_scope(),
+            encouragement_mode: default_encouragement_mode(),
+            list_view: default_list_view(),
+            list_columns: default_list_columns(),
+            auto_pager: default_auto_pager(),
+            saved_commands: BTreeMap::new(),
+            last_greeted: None,
         }
     }
 }

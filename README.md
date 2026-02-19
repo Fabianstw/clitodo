@@ -16,6 +16,7 @@ A fast, local-first CLI todo app built in Rust. Tasks support optional due date,
 - Import from JSON or CSV
 - Archive done tasks
 - Configurable defaults and shell completions
+- Personal settings (name + daily greeting)
 - Export to JSON, Markdown, or text
 
 ## Install
@@ -62,6 +63,7 @@ todo create "Pack" --tag travel --tag urgent
 todo list
 todo l -a
 todo list --sort priority --desc
+todo list --group-by due-day
 todo list --archived
 todo list --tag urgent
 todo list-all
@@ -160,6 +162,57 @@ todo config --id-scope branch
 todo config --use-uuid true
 ```
 
+### Settings (personalization)
+
+Set your name (used for the daily greeting):
+
+```bash
+todo settings --name "Fabian"
+```
+
+Customize (or clear) the daily message:
+
+```bash
+todo settings --message "You’ve got this." --daily-greeting true
+todo settings --clear-message
+```
+
+More personalization examples:
+
+```bash
+# Night-owl friendly: treat a new day as starting at 06:00
+todo settings --day-start-hour 6
+
+# Compact greeting instead of banner
+todo settings --greeting-style compact
+
+# Summarize across all branches
+todo settings --summary-scope all
+
+# Built-in rotating encouragements (if no custom message is set)
+todo settings --encouragement built-in
+
+# Optional pronouns
+todo settings --pronouns "they/them"
+
+# List UI preferences
+todo settings --list-view table
+todo settings --column due --column priority --column tags
+todo settings --auto-pager true
+```
+
+Show current settings:
+
+```bash
+todo settings
+```
+
+Force the greeting to show again next run:
+
+```bash
+todo settings --reset-greeting
+```
+
 ### Completions
 
 ```bash
@@ -222,6 +275,7 @@ todo branch-merge work personal
 - unarchive: unarc, unarchive
 - completions: comp, completion, completions
 - config: cfg, config
+- settings: set, settings, profile, me
 
 ## Branch model
 

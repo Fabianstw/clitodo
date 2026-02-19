@@ -1,6 +1,15 @@
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::model::{IdScope, Priority, Repeat, SortKey};
+use crate::model::{
+    EncouragementMode, GreetingStyle, IdScope, ListColumn, ListViewStyle, Priority, Repeat,
+    SortKey, SummaryScope,
+};
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum GroupBy {
+    /// Group by due date (day) in table view
+    DueDay,
+}
 
 #[derive(Parser)]
 #[command(name = "todo", version, about = "Terminal todo app")]
@@ -168,6 +177,42 @@ pub enum Commands {
         /// Sort ascending
         #[arg(long = "asc")]
         asc: bool,
+
+        /// Group output (table view)
+        #[arg(long = "group-by", value_enum)]
+        group_by: Option<GroupBy>,
+    },
+
+    /// Show tasks split into “has due date” and “no due date” sections
+    #[command(aliases = ["due-split"])]
+    SplitDue {
+        /// Include completed tasks
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+
+        /// Include archived tasks
+        #[arg(long = "archived")]
+        archived: bool,
+
+        /// Filter by branch
+        #[arg(short = 'b', long = "branch")]
+        branch: Option<String>,
+
+        /// Filter by tag (can repeat)
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+
+        /// Sort by: due, priority, created, id
+        #[arg(short = 's', long = "sort", value_enum)]
+        sort: Option<SortKey>,
+
+        /// Sort descending
+        #[arg(long = "desc")]
+        desc: bool,
+
+        /// Sort ascending
+        #[arg(long = "asc")]
+        asc: bool,
     },
 
     /// List tasks grouped by branch
@@ -196,6 +241,10 @@ pub enum Commands {
         /// Sort ascending
         #[arg(long = "asc")]
         asc: bool,
+
+        /// Group output (table view)
+        #[arg(long = "group-by", value_enum)]
+        group_by: Option<GroupBy>,
     },
 
     /// List repeating tasks
@@ -228,6 +277,10 @@ pub enum Commands {
         /// Sort ascending
         #[arg(long = "asc")]
         asc: bool,
+
+        /// Group output (table view)
+        #[arg(long = "group-by", value_enum)]
+        group_by: Option<GroupBy>,
     },
 
     /// List only completed tasks
@@ -256,6 +309,10 @@ pub enum Commands {
         /// Filter by tag (can repeat)
         #[arg(long = "tag")]
         tags: Vec<String>,
+
+        /// Group output (table view)
+        #[arg(long = "group-by", value_enum)]
+        group_by: Option<GroupBy>,
     },
 
     /// Search tasks by text (title or content)
@@ -290,6 +347,10 @@ pub enum Commands {
         /// Filter by tag (can repeat)
         #[arg(long = "tag")]
         tags: Vec<String>,
+
+        /// Group output (table view)
+        #[arg(long = "group-by", value_enum)]
+        group_by: Option<GroupBy>,
     },
 
     /// Show reminders for today and overdue tasks
@@ -480,6 +541,85 @@ pub enum Commands {
         branch: Option<String>,
     },
 
+    /// Manage saved commands (custom aliases)
+    #[command(aliases = ["alias", "aliases", "cmd"])]
+    Saved {
+        #[command(subcommand)]
+        command: SavedCommands,
+    },
+
+    /// Show or update personal settings
+    #[command(aliases = ["set", "settings", "profile", "me"])]
+    Settings {
+        /// Your name (used for greetings)
+        #[arg(long = "name")]
+        name: Option<String>,
+
+        /// Clear stored name
+        #[arg(long = "clear-name")]
+        clear_name: bool,
+
+        /// Custom daily message (shown in the greeting)
+        #[arg(long = "message")]
+        message: Option<String>,
+
+        /// Clear custom daily message
+        #[arg(long = "clear-message")]
+        clear_message: bool,
+
+        /// Enable/disable daily greeting (true/false)
+        #[arg(long = "daily-greeting")]
+        daily_greeting: Option<bool>,
+
+        /// When a new day starts (0-23). Greeting is shown once per "day".
+        #[arg(long = "day-start-hour")]
+        day_start_hour: Option<u8>,
+
+        /// Greeting style
+        #[arg(long = "greeting-style", value_enum)]
+        greeting_style: Option<GreetingStyle>,
+
+        /// Show task summary line in greeting (true/false)
+        #[arg(long = "greeting-summary")]
+        greeting_summary: Option<bool>,
+
+        /// Which tasks to summarize in the greeting
+        #[arg(long = "summary-scope", value_enum)]
+        summary_scope: Option<SummaryScope>,
+
+        /// What to show when no custom message is set
+        #[arg(long = "encouragement", value_enum)]
+        encouragement: Option<EncouragementMode>,
+
+        /// Pronouns (optional)
+        #[arg(long = "pronouns")]
+        pronouns: Option<String>,
+
+        /// Clear stored pronouns
+        #[arg(long = "clear-pronouns")]
+        clear_pronouns: bool,
+
+        /// List view style
+        #[arg(long = "list-view", value_enum)]
+        list_view: Option<ListViewStyle>,
+
+        /// Visible columns in list table (repeatable). If provided, replaces current selection.
+        #[arg(long = "column", value_enum)]
+        columns: Vec<ListColumn>,
+
+        /// Reset list columns to defaults
+        #[arg(long = "columns-default")]
+        columns_default: bool,
+
+        /// Enable/disable auto pager for long list output (true/false)
+        #[arg(long = "auto-pager")]
+        auto_pager: Option<bool>,
+
+        /// Forget that you've been greeted today (forces greeting next run)
+        #[arg(long = "reset-greeting")]
+        reset_greeting: bool,
+    },
+
     /// Show or update config defaults
     #[command(aliases = ["cfg", "config"])]
     Config {
@@ -514,6 +654,31 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+}
+
+#[derive(Subcommand)]
+pub enum SavedCommands {
+    /// Save a command under a name
+    ///
+    /// Example:
+    ///   todo saved save today -- list --group-by due-day
+    Save {
+        /// Name of the saved command
+        name: String,
+
+        /// Command tokens after `todo` (use `--` before the command)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
+    /// List saved commands
+    List,
+
+    /// Show a saved command
+    Show { name: String },
+
+    /// Remove a saved command
+    Remove { name: String },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]

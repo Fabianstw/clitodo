@@ -1,12 +1,15 @@
 use clap::{CommandFactory, Parser};
 use std::cmp::Ordering;
-use std::io::IsTerminal;
+use std::collections::HashSet;
+use std::io::{IsTerminal, Write};
 
 use crate::branch::{
     branch_matches, collect_branches, normalize_branch, normalize_state, print_branch_list,
 };
-use crate::cli::{Cli, Commands, ImportFormat};
-use crate::display::{print_task_list, print_task_list_grouped, print_task_view};
+use crate::cli::{Cli, Commands, GroupBy, ImportFormat, SavedCommands};
+use crate::display::{
+    print_task_list, print_task_list_due_split, print_task_list_grouped, print_task_view,
+};
 use crate::edit::edit_interactive;
 use crate::export::export_tasks;
 use crate::model::{
@@ -15,26 +18,41 @@ use crate::model::{
 use crate::sort::sort_tasks;
 use crate::storage::{load_state, load_tasks, save_state, save_tasks, state_path, storage_path};
 use crate::util::{advance_due, normalize_tag, normalize_tags, parse_bool_flag, parse_due};
-use chrono::Local;
+use chrono::{Datelike, Duration, Local, Timelike};
 use clap_complete::generate;
+use owo_colors::OwoColorize;
 use serde::Deserialize;
 use uuid::Uuid;
 
 pub fn run() {
-    let cli = Cli::parse();
+    let raw_args: Vec<String> = std::env::args().collect();
+
     let path = storage_path();
     let state_path = state_path();
     let mut state = load_state(&state_path);
-    let mut tasks = load_tasks(&path);
-
     normalize_state(&mut state);
+
+    let expanded_args = expand_saved_command_args(&raw_args, &state);
+    let cli = Cli::parse_from(expanded_args);
+
+    if let Commands::Saved { command } = &cli.command {
+        handle_saved_commands(command, &mut state, &state_path);
+        return;
+    }
+
+    let mut tasks = load_tasks(&path);
     let color = resolve_color(&cli, &state.config);
+    maybe_print_daily_greeting(&mut state, &tasks, color, &state_path, &cli.command);
 
     match cli.command {
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             let name = cmd.get_name().to_string();
             generate(shell, &mut cmd, name, &mut std::io::stdout());
+        }
+
+        Commands::Saved { .. } => {
+            // Handled before loading tasks.
         }
 
         Commands::Branch { name, list } => {
@@ -345,6 +363,7 @@ pub fn run() {
             branch,
             archived,
             tags,
+            group_by,
         } => {
             let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
             let sort = sort.unwrap_or(state.config.default_sort);
@@ -358,7 +377,46 @@ pub fn run() {
                 .filter(|t| tags_match(t, &tags))
                 .collect();
             sort_tasks(&mut view, sort, desc);
-            print_task_list(&view, color);
+            let group_by_day = matches!(group_by, Some(GroupBy::DueDay));
+            print_task_list(&view, &state, color, group_by_day);
+        }
+
+        Commands::SplitDue {
+            all,
+            archived,
+            branch,
+            tags,
+            sort,
+            desc,
+            asc,
+        } => {
+            let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
+            let sort = sort.unwrap_or(state.config.default_sort);
+            let desc = resolve_desc(desc, asc, state.config.default_desc);
+            let tags = normalize_tags(&tags);
+
+            let mut due_view: Vec<&Task> = tasks
+                .iter()
+                .filter(|t| all || !t.done)
+                .filter(|t| t.due.is_some())
+                .filter(|t| filter_archived(t, archived))
+                .filter(|t| branch_matches(t, Some(&branch)))
+                .filter(|t| tags_match(t, &tags))
+                .collect();
+
+            let mut no_due_view: Vec<&Task> = tasks
+                .iter()
+                .filter(|t| all || !t.done)
+                .filter(|t| t.due.is_none())
+                .filter(|t| filter_archived(t, archived))
+                .filter(|t| branch_matches(t, Some(&branch)))
+                .filter(|t| tags_match(t, &tags))
+                .collect();
+
+            sort_tasks(&mut due_view, sort, desc);
+            sort_tasks(&mut no_due_view, sort, desc);
+
+            print_task_list_due_split(&due_view, &no_due_view, &state, color);
         }
 
         Commands::ListAll {
@@ -368,6 +426,7 @@ pub fn run() {
             asc,
             archived,
             tags,
+            group_by,
         } => {
             let sort = sort.unwrap_or(state.config.default_sort);
             let desc = resolve_desc(desc, asc, state.config.default_desc);
@@ -378,7 +437,8 @@ pub fn run() {
                 .filter(|t| tags_match(t, &tags))
                 .cloned()
                 .collect();
-            print_task_list_grouped(&filtered, &state, all, sort, desc, color);
+            let group_by_day = matches!(group_by, Some(GroupBy::DueDay));
+            print_task_list_grouped(&filtered, &state, all, sort, desc, color, group_by_day);
         }
 
         Commands::ListRepeat {
@@ -389,6 +449,7 @@ pub fn run() {
             branch,
             archived,
             tags,
+            group_by,
         } => {
             let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
             let sort = sort.unwrap_or(state.config.default_sort);
@@ -403,7 +464,8 @@ pub fn run() {
                 .filter(|t| tags_match(t, &tags))
                 .collect();
             sort_tasks(&mut view, sort, desc);
-            print_task_list(&view, color);
+            let group_by_day = matches!(group_by, Some(GroupBy::DueDay));
+            print_task_list(&view, &state, color, group_by_day);
         }
 
         Commands::ListDone {
@@ -413,6 +475,7 @@ pub fn run() {
             branch,
             archived,
             tags,
+            group_by,
         } => {
             let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
             let sort = sort.unwrap_or(state.config.default_sort);
@@ -426,7 +489,8 @@ pub fn run() {
                 .filter(|t| tags_match(t, &tags))
                 .collect();
             sort_tasks(&mut view, sort, desc);
-            print_task_list(&view, color);
+            let group_by_day = matches!(group_by, Some(GroupBy::DueDay));
+            print_task_list(&view, &state, color, group_by_day);
         }
 
         Commands::Search {
@@ -438,6 +502,7 @@ pub fn run() {
             branch,
             archived,
             tags,
+            group_by,
         } => {
             let q = query.to_lowercase();
             let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
@@ -454,13 +519,21 @@ pub fn run() {
                 .collect();
 
             sort_tasks(&mut view, sort, desc);
-            print_task_list(&view, color);
+            let group_by_day = matches!(group_by, Some(GroupBy::DueDay));
+            print_task_list(&view, &state, color, group_by_day);
         }
 
         Commands::Reminders { branch, tags } => {
             let branch = normalize_branch(branch).unwrap_or_else(|| state.current_branch.clone());
             let tags = normalize_tags(&tags);
-            print_reminders(&tasks, &branch, &tags, state.config.reminder_days, color);
+            print_reminders(
+                &tasks,
+                &state,
+                &branch,
+                &tags,
+                state.config.reminder_days,
+                color,
+            );
         }
 
         Commands::Stats => {
@@ -716,6 +789,139 @@ pub fn run() {
             }
         }
 
+        Commands::Settings {
+            name,
+            clear_name,
+            message,
+            clear_message,
+            daily_greeting,
+            day_start_hour,
+            greeting_style,
+            greeting_summary,
+            summary_scope,
+            encouragement,
+            pronouns,
+            clear_pronouns,
+            list_view,
+            columns,
+            columns_default,
+            auto_pager,
+            reset_greeting,
+        } => {
+            let mut changed = false;
+
+            if clear_name {
+                state.profile.name = None;
+                changed = true;
+            }
+            if let Some(name) = name {
+                let trimmed = name.trim();
+                state.profile.name = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+                changed = true;
+            }
+
+            if clear_message {
+                state.profile.daily_message = None;
+                changed = true;
+            }
+            if let Some(message) = message {
+                let trimmed = message.trim();
+                state.profile.daily_message = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+                changed = true;
+            }
+
+            if let Some(enabled) = daily_greeting {
+                state.profile.daily_greeting = enabled;
+                changed = true;
+            }
+
+            if let Some(hour) = day_start_hour {
+                if hour <= 23 {
+                    state.profile.day_start_hour = hour;
+                    changed = true;
+                } else {
+                    eprintln!("day-start-hour must be between 0 and 23");
+                    std::process::exit(2);
+                }
+            }
+
+            if let Some(style) = greeting_style {
+                state.profile.greeting_style = style;
+                changed = true;
+            }
+
+            if let Some(enabled) = greeting_summary {
+                state.profile.greeting_summary = enabled;
+                changed = true;
+            }
+
+            if let Some(scope) = summary_scope {
+                state.profile.summary_scope = scope;
+                changed = true;
+            }
+
+            if let Some(mode) = encouragement {
+                state.profile.encouragement_mode = mode;
+                changed = true;
+            }
+
+            if clear_pronouns {
+                state.profile.pronouns = None;
+                changed = true;
+            }
+            if let Some(pronouns) = pronouns {
+                let trimmed = pronouns.trim();
+                state.profile.pronouns = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+                changed = true;
+            }
+
+            if let Some(view) = list_view {
+                state.profile.list_view = view;
+                changed = true;
+            }
+
+            if columns_default {
+                state.profile.list_columns = crate::model::default_list_columns();
+                changed = true;
+            } else if !columns.is_empty() {
+                let mut unique: Vec<crate::model::ListColumn> = Vec::new();
+                for col in columns {
+                    if !unique.contains(&col) {
+                        unique.push(col);
+                    }
+                }
+                state.profile.list_columns = unique;
+                changed = true;
+            }
+
+            if let Some(enabled) = auto_pager {
+                state.profile.auto_pager = enabled;
+                changed = true;
+            }
+            if reset_greeting {
+                state.profile.last_greeted = None;
+                changed = true;
+            }
+
+            if changed {
+                save_state(&state_path, &state);
+                println!("Updated settings");
+            }
+            print_settings(&state, color);
+        }
+
         Commands::Config {
             default_sort,
             default_desc,
@@ -741,6 +947,180 @@ pub fn run() {
             }
         }
     }
+}
+
+fn reserved_top_level_command_names() -> HashSet<String> {
+    let mut reserved: HashSet<String> = HashSet::new();
+    let cmd = Cli::command();
+    for sub in cmd.get_subcommands() {
+        reserved.insert(sub.get_name().to_lowercase());
+        for alias in sub.get_all_aliases() {
+            reserved.insert(alias.to_lowercase());
+        }
+    }
+
+    // Clap built-ins / common expectations.
+    reserved.insert("help".to_string());
+    reserved.insert("version".to_string());
+
+    reserved
+}
+
+fn expand_saved_command_args(raw_args: &[String], state: &crate::model::AppState) -> Vec<String> {
+    if raw_args.len() < 2 {
+        return raw_args.to_vec();
+    }
+
+    let first = raw_args[1].as_str();
+    if first.starts_with('-') {
+        return raw_args.to_vec();
+    }
+
+    let reserved = reserved_top_level_command_names();
+    if reserved.contains(&first.to_lowercase()) {
+        return raw_args.to_vec();
+    }
+
+    let saved_key = state
+        .profile
+        .saved_commands
+        .keys()
+        .find(|k| k.eq_ignore_ascii_case(first))
+        .cloned();
+
+    let Some(saved_key) = saved_key else {
+        return raw_args.to_vec();
+    };
+    let Some(saved_args) = state.profile.saved_commands.get(&saved_key) else {
+        return raw_args.to_vec();
+    };
+    if saved_args.is_empty() {
+        return raw_args.to_vec();
+    }
+
+    let mut expanded: Vec<String> = Vec::with_capacity(1 + saved_args.len() + raw_args.len());
+    expanded.push(raw_args[0].clone());
+    expanded.extend(saved_args.iter().cloned());
+    expanded.extend(raw_args.iter().skip(2).cloned());
+    expanded
+}
+
+fn handle_saved_commands(
+    command: &SavedCommands,
+    state: &mut crate::model::AppState,
+    state_path: &std::path::PathBuf,
+) {
+    match command {
+        SavedCommands::List => {
+            if state.profile.saved_commands.is_empty() {
+                println!("No saved commands.");
+                return;
+            }
+
+            for (name, args) in state.profile.saved_commands.iter() {
+                println!("{name}: {}", args.join(" "));
+            }
+        }
+
+        SavedCommands::Show { name } => {
+            let key = state
+                .profile
+                .saved_commands
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case(name))
+                .cloned();
+            let Some(key) = key else {
+                eprintln!("No saved command named '{name}'");
+                std::process::exit(1);
+            };
+            let args = state
+                .profile
+                .saved_commands
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            println!("{key}: todo {}", args.join(" "));
+        }
+
+        SavedCommands::Remove { name } => {
+            let key = state
+                .profile
+                .saved_commands
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case(name))
+                .cloned();
+            let Some(key) = key else {
+                eprintln!("No saved command named '{name}'");
+                std::process::exit(1);
+            };
+            state.profile.saved_commands.remove(&key);
+            save_state(state_path, state);
+            println!("Removed saved command '{key}'");
+        }
+
+        SavedCommands::Save { name, args } => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                eprintln!("Saved command name cannot be empty");
+                std::process::exit(2);
+            }
+            if trimmed.starts_with('-') {
+                eprintln!("Saved command name cannot start with '-'");
+                std::process::exit(2);
+            }
+
+            let reserved = reserved_top_level_command_names();
+            if reserved.contains(&trimmed.to_lowercase()) {
+                eprintln!("'{trimmed}' is a built-in command name/alias and cannot be overwritten");
+                std::process::exit(2);
+            }
+
+            if args.is_empty() {
+                eprintln!(
+                    "No command provided. Example: todo saved save today -- list --group-by due-day"
+                );
+                std::process::exit(2);
+            }
+
+            let existing_key = state
+                .profile
+                .saved_commands
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case(trimmed))
+                .cloned();
+            if let Some(existing_key) = existing_key {
+                if !confirm_overwrite(&format!("Overwrite saved command '{existing_key}'?")) {
+                    println!("Not overwritten.");
+                    return;
+                }
+                state.profile.saved_commands.remove(&existing_key);
+            }
+
+            state
+                .profile
+                .saved_commands
+                .insert(trimmed.to_string(), args.clone());
+            save_state(state_path, state);
+            println!("Saved command '{trimmed}'");
+        }
+    }
+}
+
+fn confirm_overwrite(prompt: &str) -> bool {
+    if !std::io::stdin().is_terminal() {
+        return false;
+    }
+
+    let mut stdout = std::io::stdout();
+    let _ = write!(stdout, "{prompt} [y/N]: ");
+    let _ = stdout.flush();
+
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+
+    matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes")
 }
 
 fn task_matches(task: &Task, query: &str) -> bool {
@@ -1001,7 +1381,14 @@ fn bulk_move(tasks: &mut [Task], query: &str, branch: &str, target: &str, scope:
     count
 }
 
-fn print_reminders(tasks: &[Task], branch: &str, tags: &[String], reminder_days: u32, color: bool) {
+fn print_reminders(
+    tasks: &[Task],
+    state: &crate::model::AppState,
+    branch: &str,
+    tags: &[String],
+    reminder_days: u32,
+    color: bool,
+) {
     let today = Local::now().date_naive();
     let mut overdue: Vec<&Task> = Vec::new();
     let mut today_list: Vec<&Task> = Vec::new();
@@ -1043,7 +1430,7 @@ fn print_reminders(tasks: &[Task], branch: &str, tags: &[String], reminder_days:
 
     if !overdue.is_empty() {
         println!("Overdue ({})", overdue.len());
-        print_task_list(&overdue, color);
+        print_task_list(&overdue, state, color, false);
     }
 
     if !today_list.is_empty() {
@@ -1051,7 +1438,7 @@ fn print_reminders(tasks: &[Task], branch: &str, tags: &[String], reminder_days:
             println!();
         }
         println!("Due today ({})", today_list.len());
-        print_task_list(&today_list, color);
+        print_task_list(&today_list, state, color, false);
     }
 
     if !upcoming.is_empty() {
@@ -1059,7 +1446,7 @@ fn print_reminders(tasks: &[Task], branch: &str, tags: &[String], reminder_days:
             println!();
         }
         println!("Upcoming ({})", upcoming.len());
-        print_task_list(&upcoming, color);
+        print_task_list(&upcoming, state, color, false);
     }
 }
 
@@ -1516,4 +1903,393 @@ fn print_config(config: &AppConfig) {
     println!("reminder_days:{:>3}", config.reminder_days);
     println!("id_scope:     {:?}", config.id_scope);
     println!("use_uuid:     {}", config.use_uuid);
+}
+
+fn maybe_print_daily_greeting(
+    state: &mut crate::model::AppState,
+    tasks: &[Task],
+    color: bool,
+    state_path: &std::path::PathBuf,
+    command: &Commands,
+) {
+    if matches!(command, Commands::Completions { .. }) {
+        return;
+    }
+    if !state.profile.daily_greeting {
+        return;
+    }
+    if !std::io::stdout().is_terminal() {
+        return;
+    }
+
+    let now = Local::now();
+    let day_key = (now - Duration::hours(state.profile.day_start_hour as i64)).date_naive();
+    if state.profile.last_greeted == Some(day_key) {
+        return;
+    }
+
+    let hour = now.hour();
+    let salutation = if hour < 12 {
+        "Good morning"
+    } else if hour < 18 {
+        "Good afternoon"
+    } else {
+        "Good evening"
+    };
+
+    let name = state
+        .profile
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("friend");
+
+    let greeting_text = format!("{salutation}, {name}!");
+    let message_text = greeting_message(state, day_key);
+
+    let summary_text = if state.profile.greeting_summary {
+        let (open, overdue, due_today) = match state.profile.summary_scope {
+            crate::model::SummaryScope::Current => {
+                task_summary_current_branch(tasks, &state.current_branch)
+            }
+            crate::model::SummaryScope::All => task_summary_all(tasks),
+        };
+
+        if open > 0 {
+            Some(format!(
+                "Today: {open} open task{} · {overdue} overdue · {due_today} due today",
+                if open == 1 { "" } else { "s" },
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    match state.profile.greeting_style {
+        crate::model::GreetingStyle::Banner => {
+            let term_width = terminal_width().unwrap_or(80).clamp(40, 200);
+            let banner_width =
+                std::cmp::min(std::cmp::max(44, std::cmp::min(78, term_width)), term_width);
+            let inner_width = banner_width.saturating_sub(2);
+
+            let top = format!("┏{}┓", "━".repeat(inner_width));
+            let bottom = format!("┗{}┛", "━".repeat(inner_width));
+            let greet_line = format!("┃{}┃", center_in_width(&greeting_text, inner_width));
+            let msg_line = format!("┃{}┃", center_in_width(&message_text, inner_width));
+            let summary_line = summary_text
+                .as_ref()
+                .map(|s| format!("┃{}┃", center_in_width(s, inner_width)));
+
+            println!();
+            print_banner_line(&top, term_width, color, BannerStyle::Border);
+            print_banner_line(&greet_line, term_width, color, BannerStyle::Greeting);
+            if !message_text.is_empty() {
+                print_banner_line(&msg_line, term_width, color, BannerStyle::Message);
+            }
+            if let Some(line) = summary_line {
+                print_banner_line(&line, term_width, color, BannerStyle::Summary);
+            }
+            print_banner_line(&bottom, term_width, color, BannerStyle::Border);
+        }
+
+        crate::model::GreetingStyle::Compact => {
+            let term_width = terminal_width().unwrap_or(80).clamp(40, 200);
+            let line = if message_text.is_empty() {
+                greeting_text.clone()
+            } else {
+                format!("{greeting_text} — {message_text}")
+            };
+
+            if color {
+                println!("{}", center_line(&line, term_width).bright_yellow().bold());
+            } else {
+                println!("{}", center_line(&line, term_width));
+            }
+
+            if let Some(summary) = summary_text {
+                if color {
+                    println!(
+                        "{}",
+                        center_line(&summary, term_width).bright_cyan().dimmed()
+                    );
+                } else {
+                    println!("{}", center_line(&summary, term_width));
+                }
+            }
+        }
+    }
+
+    if state
+        .profile
+        .name
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        let tip = "Tip: set your name with: todo settings --name \"Your Name\"";
+        let term_width = terminal_width().unwrap_or(80).clamp(40, 200);
+        let tip_line = center_line(tip, term_width);
+        if color {
+            println!("{}", tip_line.dimmed());
+        } else {
+            println!("{tip_line}");
+        }
+    }
+
+    println!();
+
+    state.profile.last_greeted = Some(day_key);
+    save_state(state_path, state);
+}
+
+fn greeting_message(state: &crate::model::AppState, day_key: chrono::NaiveDate) -> String {
+    if let Some(msg) = state.profile.daily_message.as_deref().map(str::trim) {
+        if !msg.is_empty() {
+            return msg.to_string();
+        }
+    }
+
+    match state.profile.encouragement_mode {
+        crate::model::EncouragementMode::Off => String::new(),
+        crate::model::EncouragementMode::CustomOnly => String::new(),
+        crate::model::EncouragementMode::BuiltIn => built_in_encouragement(day_key).to_string(),
+    }
+}
+
+fn built_in_encouragement(day_key: chrono::NaiveDate) -> &'static str {
+    const LINES: &[&str] = &[
+        "You’ve got this.",
+        "One small step is still progress.",
+        "Be kind to yourself today.",
+        "Start with the easiest win.",
+        "Future-you will thank you.",
+        "Make it simple. Make it real.",
+        "Momentum beats perfection.",
+    ];
+
+    let idx = (day_key.num_days_from_ce() as usize) % LINES.len();
+    LINES[idx]
+}
+
+#[derive(Copy, Clone)]
+enum BannerStyle {
+    Border,
+    Greeting,
+    Message,
+    Summary,
+}
+
+fn print_banner_line(line: &str, term_width: usize, color: bool, style: BannerStyle) {
+    let centered = center_line(line, term_width);
+    if !color {
+        println!("{centered}");
+        return;
+    }
+
+    match style {
+        BannerStyle::Border => println!("{}", centered.bright_blue().bold()),
+        BannerStyle::Greeting => println!("{}", centered.bright_yellow().bold()),
+        BannerStyle::Message => println!("{}", centered.bright_magenta().bold()),
+        BannerStyle::Summary => println!("{}", centered.bright_cyan().dimmed()),
+    }
+}
+
+fn terminal_width() -> Option<usize> {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|w| *w > 0)
+}
+
+fn center_line(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if width <= len {
+        return text.to_string();
+    }
+    let pad = (width - len) / 2;
+    format!("{}{}", " ".repeat(pad), text)
+}
+
+fn center_in_width(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if width <= len {
+        return text.chars().take(width).collect();
+    }
+
+    let left = (width - len) / 2;
+    let right = width - len - left;
+    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+}
+
+fn task_summary_current_branch(tasks: &[Task], branch: &str) -> (usize, usize, usize) {
+    let today = Local::now().date_naive();
+    let mut open = 0usize;
+    let mut overdue = 0usize;
+    let mut due_today = 0usize;
+
+    for task in tasks.iter() {
+        if task.done || task.archived {
+            continue;
+        }
+        if !task.branch.eq_ignore_ascii_case(branch) {
+            continue;
+        }
+        open += 1;
+        if let Some(due) = task.due {
+            if due < today {
+                overdue += 1;
+            } else if due == today {
+                due_today += 1;
+            }
+        }
+    }
+
+    (open, overdue, due_today)
+}
+
+fn task_summary_all(tasks: &[Task]) -> (usize, usize, usize) {
+    let today = Local::now().date_naive();
+    let mut open = 0usize;
+    let mut overdue = 0usize;
+    let mut due_today = 0usize;
+
+    for task in tasks.iter() {
+        if task.done || task.archived {
+            continue;
+        }
+        open += 1;
+        if let Some(due) = task.due {
+            if due < today {
+                overdue += 1;
+            } else if due == today {
+                due_today += 1;
+            }
+        }
+    }
+
+    (open, overdue, due_today)
+}
+
+fn print_settings(state: &crate::model::AppState, color: bool) {
+    let name = state
+        .profile
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("friend (default)");
+    let pronouns = state
+        .profile
+        .pronouns
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("<not set>");
+    let message = state
+        .profile
+        .daily_message
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("<default>");
+    let greeting = if state.profile.daily_greeting {
+        "on"
+    } else {
+        "off"
+    };
+    let greeted = state
+        .profile
+        .last_greeted
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "<never>".to_string());
+    let columns = if state.profile.list_columns.is_empty() {
+        "<default>".to_string()
+    } else {
+        state
+            .profile
+            .list_columns
+            .iter()
+            .map(|c| format!("{c:?}").to_lowercase())
+            .collect::<Vec<String>>()
+            .join(",")
+    };
+
+    if color {
+        println!("{} {}", "name:".dimmed(), name);
+        println!("{} {}", "pronouns:".dimmed(), pronouns);
+        println!("{} {}", "daily_greeting:".dimmed(), greeting);
+        println!(
+            "{} {}",
+            "day_start_hour:".dimmed(),
+            state.profile.day_start_hour
+        );
+        println!(
+            "{} {:?}",
+            "greeting_style:".dimmed(),
+            state.profile.greeting_style
+        );
+        println!(
+            "{} {}",
+            "greeting_summary:".dimmed(),
+            if state.profile.greeting_summary {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!(
+            "{} {:?}",
+            "summary_scope:".dimmed(),
+            state.profile.summary_scope
+        );
+        println!(
+            "{} {:?}",
+            "encouragement:".dimmed(),
+            state.profile.encouragement_mode
+        );
+        println!("{} {:?}", "list_view:".dimmed(), state.profile.list_view);
+        println!("{} {}", "list_columns:".dimmed(), columns);
+        println!(
+            "{} {}",
+            "auto_pager:".dimmed(),
+            if state.profile.auto_pager {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!("{} {}", "daily_message:".dimmed(), message);
+        println!("{} {}", "last_greeted:".dimmed(), greeted);
+    } else {
+        println!("name:          {name}");
+        println!("pronouns:      {pronouns}");
+        println!("daily_greeting:{:>4}", greeting);
+        println!("day_start_hour:{:>4}", state.profile.day_start_hour);
+        println!("greeting_style: {:?}", state.profile.greeting_style);
+        println!(
+            "greeting_summary:{:>3}",
+            if state.profile.greeting_summary {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!("summary_scope: {:?}", state.profile.summary_scope);
+        println!("encouragement: {:?}", state.profile.encouragement_mode);
+        println!("list_view:     {:?}", state.profile.list_view);
+        println!("list_columns:  {columns}");
+        println!(
+            "auto_pager:    {}",
+            if state.profile.auto_pager {
+                "on"
+            } else {
+                "off"
+            }
+        );
+        println!("daily_message: {message}");
+        println!("last_greeted:  {greeted}");
+    }
 }
